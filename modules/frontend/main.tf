@@ -21,8 +21,8 @@ resource "aws_security_group" "alb_sg" {
   tags = merge(var.tags, { Name = "${var.tags["Environment"]}-alb-sg" })
 }
 
-resource "aws_security_group" "ec2_sg" {
-  name = "${var.tags["Environment"]}-frontend-ec2-sg"
+resource "aws_security_group" "alb_sg" {
+  name = "${var.tags["Environment"]}-alb-sg-" 
   description = "Allow HTTP traffic only from ALB"
   vpc_id = var.vpc_id
 
@@ -89,9 +89,20 @@ resource "aws_lb_listener" "frontend_listener" {
 # Launch Template & Auto Scaling Group
 # ------------------------------------------------------------------------------
 
+data "aws_ami" "amazon_linux_2023" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-kernel-*-x86_64"]
+  }
+}
+
+
 resource "aws_launch_template" "frontend_lt" {
   name_prefix = "${var.tags["Environment"]}-frontend-lt-"
-  image_id = var.ami_id
+  image_id = data.aws_ami.amazon_linux_2023.id
   instance_type = var.instance_type
 
   vpc_security_group_ids = [aws_security_group.ec2_sg.id]
@@ -102,7 +113,12 @@ resource "aws_launch_template" "frontend_lt" {
               yum install -y httpd
               systemctl start httpd
               systemctl enable httpd
-              echo "<h1>Hello from the Frontend in ${var.tags["Environment"]}</h1>" > /var/www/html/index.html
+              
+              # Fetch the local AZ from AWS Metadata Service (IMDSv2)
+              TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+              AZ=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/availability-zone)
+              
+              echo "<h1>Hello from Frontend | Env: ${var.tags["Environment"]} | Zone: $AZ</h1>" > /var/www/html/index.html
               EOF
   )
 
@@ -123,12 +139,15 @@ resource "aws_autoscaling_group" "frontend_asg" {
 
   launch_template {
     id      = aws_launch_template.frontend_lt.id
-    version = "$Latest"
+    version = aws_launch_template.frontend_lt.latest_version # Better than "$Latest"
   }
 
-  tag {
-    key                 = "Name"
-    value               = "${var.tags["Environment"]}-frontend-asg"
-    propagate_at_launch = true
+  # Automatically roll out updates to instances
+  instance_refresh {
+    strategy = "Rolling"
+    preferences {
+      min_healthy_percentage = 50
+    }
+    triggers = ["tag"]
   }
 }

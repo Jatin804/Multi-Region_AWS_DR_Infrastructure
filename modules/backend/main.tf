@@ -19,18 +19,21 @@ resource "aws_s3_bucket_versioning" "app_data_versioning" {
 # ==============================================================================
 
 resource "aws_dynamodb_table" "app_sessions" {
-  name = "${var.tags["Environment"]}-sessions"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key = "SessionId"
+  name             = "${var.tags["Environment"]}-sessions"
+  billing_mode     = "PAY_PER_REQUEST"
+  hash_key         = "SessionId"
+  stream_enabled   = true
+  stream_view_type = "NEW_AND_OLD_IMAGES"
 
   attribute {
     name = "SessionId"
     type = "S"
   }
 
-  # Enabling streams is required if you want to upgrade this to a Global Table later
-  stream_enabled = true
-  stream_view_type = "NEW_AND_OLD_IMAGES"
+  # Add this block to automatically replicate data to your DR region
+  replica {
+    region_name = var.dr_region # e.g., "us-west-2"
+  }
 
   tags = merge(var.tags, { Name = "${var.tags["Environment"]}-sessions" })
 }
@@ -83,7 +86,7 @@ resource "aws_db_instance" "app_database" {
 # ==============================================================================
 
 resource "aws_iam_role" "frontend_role" {
-  name = "${var.tags["Environment"]}-frontend-role"
+  name = "${var.tags["Environment"]}-${var.aws_region}-frontend-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -139,4 +142,34 @@ resource "aws_iam_role_policy_attachment" "backend_access_attach" {
 resource "aws_iam_instance_profile" "frontend_profile" {
   name = "${var.tags["Environment"]}-frontend-profile"
   role = aws_iam_role.frontend_role.name
+}
+
+# 1. Create the Global Cluster (Runs only once)
+resource "aws_rds_global_cluster" "global_db" {
+  global_cluster_identifier = "${var.tags["Environment"]}-global-db"
+  engine                    = "aurora-postgresql"
+  engine_version            = "15.4"
+  database_name             = "appdb"
+}
+
+# 2. Create the Regional Cluster (Deploy this in BOTH regions)
+resource "aws_rds_cluster" "primary" {
+  cluster_identifier        = "${var.tags["Environment"]}-${var.aws_region}-cluster"
+  engine                    = aws_rds_global_cluster.global_db.engine
+  engine_version            = aws_rds_global_cluster.global_db.engine_version
+  global_cluster_identifier = aws_rds_global_cluster.global_db.id
+  db_subnet_group_name      = aws_db_subnet_group.rds_subnet_group.name
+  vpc_security_group_ids    = [aws_security_group.rds_sg.id]
+  
+  # For Active-Active writes, Aurora supports "Write Forwarding"
+  enable_global_write_forwarding = true 
+}
+
+# 3. Create the actual instances inside the cluster
+resource "aws_rds_cluster_instance" "cluster_instances" {
+  count              = 2 # E.g., one writer, one reader per region
+  identifier         = "${var.tags["Environment"]}-${var.aws_region}-instance-${count.index}"
+  cluster_identifier = aws_rds_cluster.primary.id
+  instance_class     = "db.r6g.large" # Aurora requires specific instance classes
+  engine             = aws_rds_cluster.primary.engine
 }

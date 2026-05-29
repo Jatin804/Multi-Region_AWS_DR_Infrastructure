@@ -1,5 +1,15 @@
+variable "aws_region" {
+  description = "The AWS region where resources will be deployed"
+  type = string
+}
+
 variable "vpc_id" {
   description = "The ID of the VPC from the network module"
+  type = string
+}
+
+variable "dr_region" {
+  description = "The AWS region where the disaster recovery resources will be deployed"
   type = string
 }
 

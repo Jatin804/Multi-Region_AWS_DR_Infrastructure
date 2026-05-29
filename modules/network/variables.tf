@@ -1,47 +1,56 @@
+variable "aws_region" {
+  description = "The AWS region to deploy into (e.g., us-east-1 for Primary, us-west-2 for DR)"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "environment" {
+  description = "The environment name for tagging (e.g., prod-primary, prod-dr)"
+  type        = string
+  default     = "prod-primary"
+}
 
 variable "aws_vpc_cidr" {
-    description = "CIDR block for the VPC"
-    type = string
+  description = "The CIDR block for the VPC. Ensure this does NOT overlap between Primary and DR regions."
+  type        = string
+  default     = "10.1.0.0/16" 
 }
 
 variable "availability_zones" {
-    description = "List of availabilty zones"
-    type = list(string)
+  description = "A list of Availability Zones to deploy into"
+  type        = list(string)
+  default     = ["us-east-1a", "us-east-1b"]
 }
 
 variable "public_subnet_cidr" {
-    description = "Public subnets CIDR blocks"
-    type = list(string)
+  description = "A map of AZs to Public Subnet CIDRs"
+  type        = map(string)
+  default = {
+    "us-east-1a" = "10.1.1.0/24"
+    "us-east-1b" = "10.1.2.0/24"
+  }
 }
 
 variable "private_subnet_cidr" {
-    description = "Private subnet CIDR blocks"
-    type = list(string)
-}
-
-variable "nat_availability_mode" {
-    description = "NAT gateway availability_mode"
-    type = string
-    default = "zonal"
-}
-
-variable "vpc_endpoint" {
-    description = "VPC endpoint"
-    type = bool
-    default = false
+  description = "A map of AZs to Private Subnet CIDRs"
+  type        = map(string)
+  default = {
+    "us-east-1a" = "10.1.10.0/24"
+    "us-east-1b" = "10.1.20.0/24"
+  }
 }
 
 variable "route_cidr" {
-    description = "gateway subnet"
-    type = string  
+  description = "The default route CIDR for internet bound traffic"
+  type        = string
+  default     = "0.0.0.0/0"
 }
 
 variable "tags" {
-  description = "Common Tags"
-  type = map(string)
-#   default = {
-#     Environment = "dev"
-#     Project = "web-site"
-#     Managed_by = "terraform"
-#   }
+  description = "Default tags to apply to all resources"
+  type        = map(string)
+  default = {
+    ManagedBy = "Terraform"
+    Project   = "Multi-Region-DR"
+  }
 }
